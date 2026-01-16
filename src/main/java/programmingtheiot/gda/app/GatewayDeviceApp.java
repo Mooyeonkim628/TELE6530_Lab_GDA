@@ -20,11 +20,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
+import programmingtheiot.gda.system.SystemPerformanceManager;
 /**
  * Main GDA application.
  * 
  */
+
+
 public class GatewayDeviceApp
 {
 	// static
@@ -45,11 +47,15 @@ public class GatewayDeviceApp
 	 * 
 	 * @param configFile
 	 */
+	private SystemPerformanceManager sysPerfMgr = null;
+	
 	public GatewayDeviceApp()
 	{
 		super();
-		
+	
 		_Logger.info("Initializing GDA...");
+	
+		this.sysPerfMgr = new SystemPerformanceManager();
 	}
 	
 	
@@ -85,6 +91,7 @@ public class GatewayDeviceApp
 			}
 			
 			gwApp.stopApp(0);
+			System.exit(0);
 		} else {
 			try {
 				Thread.sleep(DEFAULT_TEST_RUNTIME);
@@ -93,6 +100,7 @@ public class GatewayDeviceApp
 			}
 			
 			gwApp.stopApp(0);
+			
 		}
 	}
 	
@@ -146,36 +154,37 @@ public class GatewayDeviceApp
 	public void startApp()
 	{
 		_Logger.info("Starting GDA...");
-		
+	
 		try {
-			// TODO: Your code here
+			if (this.sysPerfMgr.startManager()) {
+				_Logger.info("GDA started successfully.");
+			} else {
+				_Logger.warning("Failed to start system performance manager!");
 			
-			_Logger.info("GDA started successfully.");
+				stopApp(-1);
+			}
 		} catch (Exception e) {
 			_Logger.log(Level.SEVERE, "Failed to start GDA. Exiting.", e);
-			
+		
 			stopApp(-1);
 		}
 	}
-	
-	/**
-	 * Stops the application.
-	 * 
-	 * @param code The exit code to pass to {@link System.exit()}
-	 */
+
 	public void stopApp(int code)
 	{
 		_Logger.info("Stopping GDA...");
-		
+	
 		try {
-			// TODO: Your code here
-			
-			_Logger.log(Level.INFO, "GDA stopped successfully with exit code {0}.", code);
+			if (this.sysPerfMgr.stopManager()) {
+				_Logger.log(Level.INFO, "GDA stopped successfully with exit code {0}.", code);
+			} else {
+				_Logger.warning("Failed to stop system performance manager!");
+			}
 		} catch (Exception e) {
 			_Logger.log(Level.SEVERE, "Failed to cleanly stop GDA. Exiting.", e);
 		}
-		
-		System.exit(code);
+	
+		//System.exit(code);
 	}
 	
 	
