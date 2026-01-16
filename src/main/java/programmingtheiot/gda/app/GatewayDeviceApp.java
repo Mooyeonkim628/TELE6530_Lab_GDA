@@ -85,6 +85,7 @@ public class GatewayDeviceApp
 			}
 			
 			gwApp.stopApp(0);
+			System.exit(0);
 		} else {
 			try {
 				Thread.sleep(DEFAULT_TEST_RUNTIME);
@@ -93,6 +94,7 @@ public class GatewayDeviceApp
 			}
 			
 			gwApp.stopApp(0);
+			System.exit(0);
 		}
 	}
 	
@@ -175,7 +177,6 @@ public class GatewayDeviceApp
 			_Logger.log(Level.SEVERE, "Failed to cleanly stop GDA. Exiting.", e);
 		}
 		
-		System.exit(code);
 	}
 	
 	
