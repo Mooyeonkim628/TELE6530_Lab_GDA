@@ -36,6 +36,11 @@ public abstract class BaseSystemUtilTask
 	public BaseSystemUtilTask(String name, int typeID)
 	{
 		super();
+		if (name != null) {
+			this.name = name;
+		}
+	
+		this.typeID = typeID;
 	}
 	
 	
@@ -43,7 +48,7 @@ public abstract class BaseSystemUtilTask
 	
 	public String getName()
 	{
-		return null;
+		return this.name;
 	}
 	
 	/**
@@ -53,7 +58,7 @@ public abstract class BaseSystemUtilTask
 	 */
 	public int getTypeID()
 	{
-		return 0;
+		return this.typeID;
 	}
 	
 	/**
