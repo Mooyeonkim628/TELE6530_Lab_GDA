@@ -11,7 +11,6 @@
 
 package programmingtheiot.gda.app;
 
-import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import programmingtheiot.common.ConfigConst;
@@ -19,26 +18,23 @@ import programmingtheiot.common.ConfigUtil;
 import programmingtheiot.common.IActuatorDataListener;
 import programmingtheiot.common.IDataMessageListener;
 import programmingtheiot.common.ResourceNameEnum;
-
 import programmingtheiot.data.ActuatorData;
 import programmingtheiot.data.DataUtil;
 import programmingtheiot.data.SensorData;
 import programmingtheiot.data.SystemPerformanceData;
-
-import programmingtheiot.gda.connection.CloudClientConnector;
+import programmingtheiot.data.SystemStateData;
 import programmingtheiot.gda.connection.CoapServerGateway;
 import programmingtheiot.gda.connection.IPersistenceClient;
 import programmingtheiot.gda.connection.IPubSubClient;
 import programmingtheiot.gda.connection.IRequestResponseClient;
-import programmingtheiot.gda.connection.MqttClientConnector;
 import programmingtheiot.gda.connection.RedisPersistenceAdapter;
-import programmingtheiot.gda.connection.SmtpClientConnector;
-
+import programmingtheiot.gda.system.SystemPerformanceManager;
+import redis.clients.jedis.JedisPubSub;
 /**
  * Shell representation of class for student implementation.
  *
  */
-public class DeviceDataManager implements IDataMessageListener
+public class DeviceDataManager extends JedisPubSub implements IDataMessageListener
 {
 	// static
 	
@@ -59,14 +55,35 @@ public class DeviceDataManager implements IDataMessageListener
 	private IPersistenceClient persistenceClient = null;
 	private IRequestResponseClient smtpClient = null;
 	private CoapServerGateway coapServer = null;
-	
+	private boolean enableSystemPerf = false;
+	private SystemPerformanceManager sysPerfMgr = null;	
+	private RedisPersistenceAdapter redisClient = null;
+	private volatile boolean isRedisSubscribed = false;
 	// constructors
 	
 	public DeviceDataManager()
 	{
 		super();
 		
-		initConnections();
+		ConfigUtil configUtil = ConfigUtil.getInstance();
+		
+		this.enableMqttClient =
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_MQTT_CLIENT_KEY);
+		
+		this.enableCoapServer =
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_COAP_SERVER_KEY);
+		
+		this.enableCloudClient =
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_CLOUD_CLIENT_KEY);
+		
+		this.enablePersistenceClient =
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_PERSISTENCE_CLIENT_KEY);
+		
+		initManager();
 	}
 	
 	public DeviceDataManager(
@@ -87,6 +104,21 @@ public class DeviceDataManager implements IDataMessageListener
 	@Override
 	public boolean handleActuatorCommandResponse(ResourceNameEnum resourceName, ActuatorData data)
 	{
+		if (data != null) {
+			_Logger.info("Handling actuator response: " + data.getName());
+
+			if (data.hasError()) {
+				_Logger.warning("Error flag set for ActuatorData instance.");
+			}
+
+			if (this.redisClient != null) {
+				String topic = (resourceName != null) ? resourceName.getResourceName() : null;
+				if (topic != null) {
+					this.redisClient.storeData(topic, ConfigConst.DEFAULT_QOS, data);
+				}
+			}
+			return true;
+		}
 		return false;
 	}
 
@@ -99,18 +131,82 @@ public class DeviceDataManager implements IDataMessageListener
 	@Override
 	public boolean handleIncomingMessage(ResourceNameEnum resourceName, String msg)
 	{
+		if (msg != null) {
+			_Logger.info("Handling incoming generic message: " + msg);
+			
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, ActuatorData data)
+	{
+		_Logger.fine("handleIncomingDataAnalysis(ActuatorData) called. resource=" +
+			resourceName + ", data=" + ((data != null) ? data.getName() : "null"));
+	}
+
+	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, SystemStateData data)
+	{
+		_Logger.fine("handleIncomingDataAnalysis(SystemStateData) called. resource=" +
+			resourceName + ", data=" + ((data != null) ? data.getName() : "null"));
+	}
+
+	private boolean handleUpstreamTransmission(ResourceNameEnum resourceName, String jsonData, int qos)
+	{
+		_Logger.fine("handleUpstreamTransmission() called. resource=" + resourceName +
+			", qos=" + qos + ", jsonData.len=" + ((jsonData != null) ? jsonData.length() : 0));
+
 		return false;
 	}
 
 	@Override
 	public boolean handleSensorMessage(ResourceNameEnum resourceName, SensorData data)
 	{
-		return false;
+		if (data != null) {
+			_Logger.info("Handling sensor message: " + data.getName());
+
+			if (data.hasError()) {
+				_Logger.warning("Error flag set for SensorData instance.");
+			}
+
+        if (this.redisClient != null && resourceName != null) {
+
+            String channelTopic = resourceName.getResourceName();
+
+            if (channelTopic != null) {
+                String storeKey = channelTopic + ":store";
+
+                this.redisClient.storeData(storeKey, ConfigConst.DEFAULT_QOS, data);
+            }
+        }
+
+		return true;
+    }
+
+    	return false;
 	}
 
 	@Override
 	public boolean handleSystemPerformanceMessage(ResourceNameEnum resourceName, SystemPerformanceData data)
 	{
+		if (data != null) {
+			_Logger.info("Handling system performance message: " + data.getName());
+			
+			if (data.hasError()) {
+				_Logger.warning("Error flag set for SystemPerformanceData instance.");
+			}
+			
+			if (this.redisClient != null) {
+				String topic = (resourceName != null) ? resourceName.getResourceName() : null;
+				if (topic != null) {
+					this.redisClient.storeData(topic, ConfigConst.DEFAULT_QOS, data);
+				}
+			}
+
+			return true;
+		}
+
 		return false;
 	}
 	
@@ -120,13 +216,66 @@ public class DeviceDataManager implements IDataMessageListener
 	
 	public void startManager()
 	{
+		if (this.sysPerfMgr != null) {
+			this.sysPerfMgr.startManager();
+		}
+	    if (this.redisClient != null) {
+        	boolean ok = this.redisClient.connectClient();
+			 _Logger.info("Redis connectClient(): " + ok);
+			if (ok && !isRedisSubscribed) { 
+				isRedisSubscribed = true;
+				_Logger.info("Subscribing to Redis channel: " +
+					ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName());
+
+				this.redisClient.subscribeToChannel(this, ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
+			}
+		}
 	}
 	
 	public void stopManager()
 	{
+		if (this.sysPerfMgr != null) {
+			this.sysPerfMgr.stopManager();
+		}
+		if (this.redisClient != null) {
+			this.redisClient.disconnectClient();
+		}		
+	}
+	//Lab5 Optional
+	@Override
+	public void onSubscribe(String channel, int subscribedChannels)
+	{
+		_Logger.info("Redis subscribed. channel=" + channel + " count=" + subscribedChannels);
 	}
 
-	
+	@Override
+	public void onUnsubscribe(String channel, int subscribedChannels)
+	{
+		_Logger.info("Redis unsubscribed. channel=" + channel + " count=" + subscribedChannels);
+	}
+
+	@Override
+	public void onMessage(String channel, String message)
+	{
+		_Logger.info("Redis msg received. channel=" + channel + " payload=" + message);
+		
+		if (channel == null || message == null) {
+			return;
+		}
+		if (channel.equals(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName())) {
+			SensorData sd = DataUtil.getInstance().jsonToSensorData(message);
+
+			if (sd != null) {
+				this.handleSensorMessage(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, sd);
+			} else {
+				_Logger.warning("Failed to parse SensorData from JSON.");
+			}
+		}
+
+		
+	}	
+	//Optional part ends
+
 	// private methods
 	
 	/**
@@ -137,5 +286,34 @@ public class DeviceDataManager implements IDataMessageListener
 	private void initConnections()
 	{
 	}
-	
+
+	private void initManager()
+	{
+		ConfigUtil configUtil = ConfigUtil.getInstance();
+		
+		this.enableSystemPerf =
+			configUtil.getBoolean(ConfigConst.GATEWAY_DEVICE,  ConfigConst.ENABLE_SYSTEM_PERF_KEY);
+		
+		if (this.enableSystemPerf) {
+			this.sysPerfMgr = new SystemPerformanceManager();
+			this.sysPerfMgr.setDataMessageListener(this);
+		}
+		
+		if (this.enableMqttClient) {
+			// TODO: implement this in Lab Module 7
+		}
+		
+		if (this.enableCoapServer) {
+			// TODO: implement this in Lab Module 8
+		}
+		
+		if (this.enableCloudClient) {
+			// TODO: implement this in Lab Module 10
+		}
+		
+		if (this.enablePersistenceClient) {
+			this.redisClient = new RedisPersistenceAdapter();
+    		_Logger.info("Redis Persistence client enabled.");
+		}
+	}	
 }

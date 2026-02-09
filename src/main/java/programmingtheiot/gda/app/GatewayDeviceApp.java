@@ -37,7 +37,7 @@ public class GatewayDeviceApp
 	public static final long DEFAULT_TEST_RUNTIME = 60000L;
 	
 	// private var's
-	
+	private DeviceDataManager dataMgr = null;
 	private String configFile = ConfigConst.DEFAULT_CONFIG_FILE_NAME;
 
 	// constructors
@@ -55,7 +55,7 @@ public class GatewayDeviceApp
 	
 		_Logger.info("Initializing GDA...");
 	
-		this.sysPerfMgr = new SystemPerformanceManager();
+		this.dataMgr = new DeviceDataManager();
 	}
 	
 	
@@ -156,7 +156,8 @@ public class GatewayDeviceApp
 		_Logger.info("Starting GDA...");
 	
 		try {
-			if (this.sysPerfMgr.startManager()) {
+			if (this.dataMgr!=null) {
+				this.dataMgr.startManager();
 				_Logger.info("GDA started successfully.");
 			} else {
 				_Logger.warning("Failed to start system performance manager!");
@@ -175,7 +176,8 @@ public class GatewayDeviceApp
 		_Logger.info("Stopping GDA...");
 	
 		try {
-			if (this.sysPerfMgr.stopManager()) {
+			if (this.dataMgr != null) {
+				this.dataMgr.stopManager();
 				_Logger.log(Level.INFO, "GDA stopped successfully with exit code {0}.", code);
 			} else {
 				_Logger.warning("Failed to stop system performance manager!");
