@@ -9,16 +9,22 @@
 
 package programmingtheiot.integration.connection;
 
-import static org.junit.Assert.*;
-
+import java.util.Date;
 import java.util.logging.Logger;
 
 import org.junit.After;
 import org.junit.AfterClass;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import programmingtheiot.common.ConfigConst;
+import programmingtheiot.common.ResourceNameEnum;
+import programmingtheiot.data.ActuatorData;
+import programmingtheiot.data.SensorData;
+import programmingtheiot.data.SystemPerformanceData;
 import programmingtheiot.gda.connection.RedisPersistenceAdapter;
 
 /**
@@ -32,7 +38,7 @@ import programmingtheiot.gda.connection.RedisPersistenceAdapter;
 public class PersistenceClientAdapterTest
 {
 	// static
-	
+	private static RedisPersistenceAdapter client = null;
 	private static final Logger _Logger =
 		Logger.getLogger(PersistenceClientAdapterTest.class.getName());
 	
@@ -50,6 +56,7 @@ public class PersistenceClientAdapterTest
 	@BeforeClass
 	public static void setUpBeforeClass() throws Exception
 	{
+		client = new RedisPersistenceAdapter();
 	}
 	
 	/**
@@ -58,6 +65,9 @@ public class PersistenceClientAdapterTest
 	@AfterClass
 	public static void tearDownAfterClass() throws Exception
 	{
+		if (client != null) {
+			client.disconnectClient();
+		}
 	}
 	
 	/**
@@ -84,7 +94,9 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testConnectClient()
 	{
-		fail("Not yet implemented"); // TODO
+		assertNotNull(client);
+		assertTrue(client.connectClient());
+		assertTrue(client.connectClient());
 	}
 	
 	/**
@@ -93,7 +105,10 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testDisconnectClient()
 	{
-		fail("Not yet implemented"); // TODO
+		assertNotNull(client);
+		assertTrue(client.connectClient());
+		assertTrue(client.disconnectClient());
+		assertTrue(client.disconnectClient());
 	}
 	
 	/**
@@ -102,7 +117,28 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testGetActuatorData()
 	{
-		fail("Not yet implemented"); // TODO
+		assertTrue(client.connectClient());
+
+		String topic = ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE.getResourceName();
+
+
+		ActuatorData ad = new ActuatorData();
+		ad.setName("testActuator");
+		ad.setCommand(1);
+		ad.setValue(12.34f);
+
+		assertTrue(client.storeData(topic, ConfigConst.DEFAULT_QOS, ad));
+
+
+		Date start = new Date(System.currentTimeMillis() - 60_000L);
+		Date end   = new Date(System.currentTimeMillis() + 60_000L);
+
+		ActuatorData[] arr = client.getActuatorData(topic, start, end);
+
+		assertNotNull(arr);
+		assertTrue(arr.length > 0);
+
+		assertTrue(client.disconnectClient());
 	}
 	
 	/**
@@ -111,7 +147,26 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testGetSensorData()
 	{
-		fail("Not yet implemented"); // TODO
+		assertTrue(client.connectClient());
+
+		String topic = ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName();
+
+		SensorData sd = new SensorData();
+		sd.setName("testSensor");
+		sd.setValue(77.7f);
+
+		assertTrue(client.storeData(topic, ConfigConst.DEFAULT_QOS, sd));
+
+
+		Date start = new Date(System.currentTimeMillis() - 60_000L);
+		Date end   = new Date(System.currentTimeMillis() + 60_000L);
+
+		SensorData[] arr = client.getSensorData(topic, start, end);
+
+		assertNotNull(arr);
+		assertTrue(arr.length > 0);
+
+		assertTrue(client.disconnectClient());
 	}
 	
 	/**
@@ -120,7 +175,22 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testStoreDataStringIntActuatorDataArray()
 	{
-		fail("Not yet implemented"); // TODO
+				assertTrue(client.connectClient());
+
+		String topic = ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE.getResourceName();
+
+		ActuatorData a1 = new ActuatorData();
+		a1.setName("a1");
+		a1.setCommand(1);
+		a1.setValue(1.0f);
+
+		ActuatorData a2 = new ActuatorData();
+		a2.setName("a2");
+		a2.setCommand(0);
+		a2.setValue(0.0f);
+
+		assertTrue(client.storeData(topic, ConfigConst.DEFAULT_QOS, a1,a2));
+		assertTrue(client.disconnectClient());
 	}
 	
 	/**
@@ -129,7 +199,20 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testStoreDataStringIntSensorDataArray()
 	{
-		fail("Not yet implemented"); // TODO
+		assertTrue(client.connectClient());
+
+		String topic = ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName();
+
+		SensorData s1 = new SensorData();
+		s1.setName("s1");
+		s1.setValue(10.1f);
+
+		SensorData s2 = new SensorData();
+		s2.setName("s2");
+		s2.setValue(20.2f);
+
+		assertTrue(client.storeData(topic, ConfigConst.DEFAULT_QOS, s1,s2));
+		assertTrue(client.disconnectClient());
 	}
 	
 	/**
@@ -138,7 +221,24 @@ public class PersistenceClientAdapterTest
 	@Test
 	public void testStoreDataStringIntSystemPerformanceDataArray()
 	{
-		fail("Not yet implemented"); // TODO
+		assertTrue(client.connectClient());
+
+		String topic = ResourceNameEnum.GDA_SYSTEM_PERF_MSG_RESOURCE.getResourceName();
+
+		SystemPerformanceData sp1 = new SystemPerformanceData();
+		sp1.setName("sp1");
+		sp1.setCpuUtilization(11.1f);
+		sp1.setDiskUtilization(22.2f);
+		sp1.setMemoryUtilization(33.3f);
+
+		SystemPerformanceData sp2 = new SystemPerformanceData();
+		sp2.setName("sp2");
+		sp2.setCpuUtilization(44.4f);
+		sp2.setDiskUtilization(55.5f);
+		sp2.setMemoryUtilization(66.6f);
+
+		assertTrue(client.storeData(topic, ConfigConst.DEFAULT_QOS, sp1,sp2));
+		assertTrue(client.disconnectClient());
 	}
 	
 }

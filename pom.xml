@@ -61,7 +61,18 @@
 			<artifactId>scandium</artifactId>
 			<version>3.14.0</version>
 		</dependency>
-		
+		<dependency>
+  			<groupId>org.slf4j</groupId>
+  			<artifactId>slf4j-simple</artifactId>
+  			<version>1.7.36</version>
+  			<scope>test</scope>
+		</dependency>
+		<dependency>
+  			<groupId>ch.qos.logback</groupId>
+  			<artifactId>logback-classic</artifactId>
+  			<version>1.4.14</version>
+		</dependency>
+
 		<!--
 			NOTE: These dependencies are optional for use
 			with Lab Module's 05 and 12.
@@ -107,9 +118,15 @@
 	<build>
 		<plugins>
 			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<version>3.0.0-M5</version>
+  				<groupId>org.apache.maven.plugins</groupId>
+  				<artifactId>maven-surefire-plugin</artifactId>
+  				<version>3.0.0-M5</version>
+  				<configuration>
+    				<useFile>false</useFile>
+    				<redirectTestOutputToFile>false</redirectTestOutputToFile>
+    				<forkCount>0</forkCount>
+    				<reuseForks>false</reuseForks>
+  				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

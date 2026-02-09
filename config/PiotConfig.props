@@ -64,6 +64,15 @@ enableCrypt    = False
 enableConfirmedMsgs = True
 
 #
+# Persistence client configuration information
+#
+[Data.GatewayService]
+credFile = ./cred/PiotPersistenceCred.props
+host = localhost
+port = 6380
+enableCrypt = False
+
+#
 # GDA specific configuration information
 #
 [GatewayDevice]
@@ -75,7 +84,7 @@ enableCoapServer        = False
 enableCoapClient        = False
 enableCloudClient       = False
 enableSmtpClient        = False
-enablePersistenceClient = False
+enablePersistenceClient = True
 enableSystemPerformance = False
 testGdaDataPath         = /tmp/gda-data
 testCdaDataPath         = /tmp/cda-data
