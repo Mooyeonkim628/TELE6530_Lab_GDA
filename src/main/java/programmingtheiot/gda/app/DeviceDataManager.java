@@ -27,6 +27,7 @@ import programmingtheiot.gda.connection.CoapServerGateway;
 import programmingtheiot.gda.connection.IPersistenceClient;
 import programmingtheiot.gda.connection.IPubSubClient;
 import programmingtheiot.gda.connection.IRequestResponseClient;
+import programmingtheiot.gda.connection.MqttClientConnector;
 import programmingtheiot.gda.connection.RedisPersistenceAdapter;
 import programmingtheiot.gda.system.SystemPerformanceManager;
 import redis.clients.jedis.JedisPubSub;
@@ -216,9 +217,36 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	
 	public void startManager()
 	{
+		_Logger.info("Starting DeviceDataManager...");
 		if (this.sysPerfMgr != null) {
 			this.sysPerfMgr.startManager();
 		}
+
+		if (this.mqttClient != null) {
+			if (this.mqttClient.connectClient()) {
+				_Logger.info("Successfully connected MQTT client to broker.");
+				
+				// add necessary subscriptions
+				
+				// TODO: read this from the configuration file
+				int qos = ConfigConst.DEFAULT_QOS;
+				
+				// TODO: check the return value for each and take appropriate action
+				
+				// IMPORTANT NOTE: The 'subscribeToTopic()' method calls shown
+				// below will be moved to MqttClientConnector.connectComplete()
+				// in Lab Module 10. For now, they can remain here.
+				this.mqttClient.subscribeToTopic(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, qos);
+				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE, qos);
+				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, qos);
+				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE, qos);
+			} else {
+				_Logger.severe("Failed to connect MQTT client to broker.");
+				
+				// TODO: take appropriate action
+			}
+		}
+	
 	    if (this.redisClient != null) {
         	boolean ok = this.redisClient.connectClient();
 			 _Logger.info("Redis connectClient(): " + ok);
@@ -234,6 +262,19 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	
 	public void stopManager()
 	{
+		_Logger.info("Stopping DeviceDataManager...");
+		if (this.mqttClient != null) {
+			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE);
+			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE);
+			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
+			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE);
+			
+			if (this.mqttClient.disconnectClient()) {
+				_Logger.info("Successfully disconnected MQTT client from broker.");
+			} else {
+				_Logger.severe("Failed to disconnect MQTT client from broker.");
+			}
+		}	
 		if (this.sysPerfMgr != null) {
 			this.sysPerfMgr.stopManager();
 		}
@@ -300,8 +341,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 		
 		if (this.enableMqttClient) {
-			// TODO: implement this in Lab Module 7
+			this.mqttClient = new MqttClientConnector();
+			this.mqttClient.setDataMessageListener(this);
 		}
+	
 		
 		if (this.enableCoapServer) {
 			// TODO: implement this in Lab Module 8
