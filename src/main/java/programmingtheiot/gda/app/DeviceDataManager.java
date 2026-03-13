@@ -60,6 +60,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private SystemPerformanceManager sysPerfMgr = null;	
 	private RedisPersistenceAdapter redisClient = null;
 	private volatile boolean isRedisSubscribed = false;
+	
 	// constructors
 	
 	public DeviceDataManager()
@@ -141,10 +142,17 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 	}
 
-	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, ActuatorData data)
+	private void handleIncomingDataAnalysis(ResourceNameEnum resource, ActuatorData data)
 	{
-		_Logger.fine("handleIncomingDataAnalysis(ActuatorData) called. resource=" +
-			resourceName + ", data=" + ((data != null) ? data.getName() : "null"));
+		_Logger.info("Analyzing incoming actuator data: " + data.getName());
+
+		if (data.isResponseFlagEnabled()) {
+			// TODO
+		} else {
+			if (this.actuatorDataListener != null) {
+				this.actuatorDataListener.onActuatorDataUpdate(data);
+			}
+		}
 	}
 
 	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, SystemStateData data)
@@ -211,8 +219,12 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		return false;
 	}
 	
+	@Override
 	public void setActuatorDataListener(String name, IActuatorDataListener listener)
 	{
+		if (listener != null) {
+			this.actuatorDataListener = listener;
+		}
 	}
 	
 	public void startManager()
@@ -258,6 +270,13 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				this.redisClient.subscribeToChannel(this, ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
 			}
 		}
+		if (this.enableCoapServer && this.coapServer != null) {
+			if (this.coapServer.startServer()) {
+				_Logger.info("CoAP server started.");
+			} else {
+				_Logger.severe("Failed to start CoAP server. Check log file for details.");
+			}
+		}
 	}
 	
 	public void stopManager()
@@ -280,7 +299,15 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 		if (this.redisClient != null) {
 			this.redisClient.disconnectClient();
-		}		
+		}	
+		
+		if (this.enableCoapServer && this.coapServer != null) {
+			if (this.coapServer.stopServer()) {
+				_Logger.info("CoAP server stopped.");
+			} else {
+				_Logger.severe("Failed to stop CoAP server. Check log file for details.");
+			}
+		}
 	}
 	//Lab5 Optional
 	@Override
@@ -345,9 +372,8 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			this.mqttClient.setDataMessageListener(this);
 		}
 	
-		
 		if (this.enableCoapServer) {
-			// TODO: implement this in Lab Module 8
+			this.coapServer = new CoapServerGateway(this);
 		}
 		
 		if (this.enableCloudClient) {
