@@ -199,7 +199,7 @@ public class CoapServerGateway
 		updateTelemetryResourceHandler.setDataMessageListener(this.dataMsgListener);
 		
 		addResource(
-			ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, null,	updateTelemetryResourceHandler);
+			ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, null, updateTelemetryResourceHandler);
 		
 		UpdateSystemPerformanceResourceHandler updateSystemPerformanceResourceHandler =
 			new UpdateSystemPerformanceResourceHandler(
@@ -209,5 +209,14 @@ public class CoapServerGateway
 		
 		addResource(
 			ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE, null, updateSystemPerformanceResourceHandler);
+
+		UpdateSystemPerformanceResourceHandler gdaMgmtStatusResourceHandler =
+			new UpdateSystemPerformanceResourceHandler(
+				ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE.getResourceType());
+		
+		gdaMgmtStatusResourceHandler.setDataMessageListener(this.dataMsgListener);
+		
+		addResource(
+			ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, gdaMgmtStatusResourceHandler);
 	}
 }
