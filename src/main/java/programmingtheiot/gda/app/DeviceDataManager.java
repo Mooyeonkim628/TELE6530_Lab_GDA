@@ -190,21 +190,37 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.warning("Error flag set for SensorData instance.");
 			}
 
-        if (this.redisClient != null && resourceName != null) {
+			if (this.redisClient != null && resourceName != null) {
+				String channelTopic = resourceName.getResourceName();
 
-            String channelTopic = resourceName.getResourceName();
+				if (channelTopic != null) {
+					String storeKey = channelTopic + ":store";
+					this.redisClient.storeData(storeKey, ConfigConst.DEFAULT_QOS, data);
+				}
+			}
 
-            if (channelTopic != null) {
-                String storeKey = channelTopic + ":store";
+			if (this.coapClient != null && resourceName != null) {
+				try {
+					String jsonData = DataUtil.getInstance().sensorDataToJson(data);
 
-                this.redisClient.storeData(storeKey, ConfigConst.DEFAULT_QOS, data);
-            }
-        }
+					_Logger.info("Forwarding SensorData over CoAP PUT: " + jsonData);
 
-		return true;
-    }
+					this.coapClient.sendPutRequest(
+						resourceName,
+						null,
+						true,
+						jsonData,
+						5
+					);
+				} catch (Exception e) {
+					_Logger.warning("Failed to forward SensorData over CoAP. Message: " + e.getMessage());
+				}
+			}
 
-    	return false;
+			return true;
+		}
+
+		return false;
 	}
 
 	@Override

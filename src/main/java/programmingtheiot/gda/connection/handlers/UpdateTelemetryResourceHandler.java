@@ -17,10 +17,12 @@ public class UpdateTelemetryResourceHandler extends CoapResource
 		Logger.getLogger(UpdateTelemetryResourceHandler.class.getName());
 
 	private IDataMessageListener dataMsgListener = null;
+	private SensorData sensorData = new SensorData();
 
 	public UpdateTelemetryResourceHandler(String resourceName)
 	{
 		super(resourceName);
+		this.sensorData.setName("UNINITIALIZED_GDA_SENSOR"); //test
 	}
 
 	public void setDataMessageListener(IDataMessageListener listener)
@@ -43,6 +45,11 @@ public class UpdateTelemetryResourceHandler extends CoapResource
 
 				SensorData sensorData =
 					DataUtil.getInstance().jsonToSensorData(jsonData);
+
+				this.sensorData = sensorData;
+
+				_Logger.info("Received SensorData via PUT: " + jsonData);
+				_Logger.info("Stored SensorData name: " + this.sensorData.getName());
 
 				this.dataMsgListener.handleSensorMessage(
 					ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE,
@@ -72,8 +79,27 @@ public class UpdateTelemetryResourceHandler extends CoapResource
 	@Override
 	public void handleGET(CoapExchange context)
 	{
-		_Logger.info("GET called on resource: " + super.getName());
-		context.respond(ResponseCode.CONTENT, "Generic handler. No GET action taken: " + super.getName());
+		try {
+			String jsonData =
+				DataUtil.getInstance().sensorDataToJson(this.sensorData);
+
+			_Logger.info(
+				"GET called on resource: " + super.getName() +
+				", payload: " + jsonData
+			);
+
+			context.respond(ResponseCode.CONTENT, jsonData);
+		} catch (Exception e) {
+			_Logger.warning(
+				"Failed to handle GET request for telemetry data. Message: " +
+				e.getMessage()
+			);
+
+			context.respond(
+				ResponseCode.INTERNAL_SERVER_ERROR,
+				"Failed to process telemetry GET request."
+			);
+		}
 	}
 
 	@Override
