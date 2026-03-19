@@ -23,6 +23,7 @@ import programmingtheiot.data.DataUtil;
 import programmingtheiot.data.SensorData;
 import programmingtheiot.data.SystemPerformanceData;
 import programmingtheiot.data.SystemStateData;
+import programmingtheiot.gda.connection.CoapClientConnector;
 import programmingtheiot.gda.connection.CoapServerGateway;
 import programmingtheiot.gda.connection.IPersistenceClient;
 import programmingtheiot.gda.connection.IPubSubClient;
@@ -49,6 +50,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private boolean enableCloudClient = false;
 	private boolean enableSmtpClient = false;
 	private boolean enablePersistenceClient = false;
+	private boolean enableCoapClient = false;
 	
 	private IActuatorDataListener actuatorDataListener = null;
 	private IPubSubClient mqttClient = null;
@@ -60,6 +62,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private SystemPerformanceManager sysPerfMgr = null;	
 	private RedisPersistenceAdapter redisClient = null;
 	private volatile boolean isRedisSubscribed = false;
+	private CoapClientConnector coapClient = null;
 	// constructors
 	
 	public DeviceDataManager()
@@ -84,6 +87,11 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_PERSISTENCE_CLIENT_KEY);
 		
+		this.enableCoapClient =
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE,
+				ConfigConst.ENABLE_COAP_CLIENT_KEY);
+
 		initManager();
 	}
 	
@@ -110,6 +118,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 			if (data.hasError()) {
 				_Logger.warning("Error flag set for ActuatorData instance.");
+			}
+
+			if (this.actuatorDataListener != null) {
+				this.actuatorDataListener.onActuatorDataUpdate(data);
 			}
 
 			if (this.redisClient != null) {
@@ -141,10 +153,17 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 	}
 
-	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, ActuatorData data)
+	private void handleIncomingDataAnalysis(ResourceNameEnum resource, ActuatorData data)
 	{
-		_Logger.fine("handleIncomingDataAnalysis(ActuatorData) called. resource=" +
-			resourceName + ", data=" + ((data != null) ? data.getName() : "null"));
+		_Logger.info("Analyzing incoming actuator data: " + data.getName());
+
+		if (data.isResponseFlagEnabled()) {
+			// TODO
+		} else {
+			if (this.actuatorDataListener != null) {
+				this.actuatorDataListener.onActuatorDataUpdate(data);
+			}
+		}
 	}
 
 	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, SystemStateData data)
@@ -171,21 +190,37 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.warning("Error flag set for SensorData instance.");
 			}
 
-        if (this.redisClient != null && resourceName != null) {
+			if (this.redisClient != null && resourceName != null) {
+				String channelTopic = resourceName.getResourceName();
 
-            String channelTopic = resourceName.getResourceName();
+				if (channelTopic != null) {
+					String storeKey = channelTopic + ":store";
+					this.redisClient.storeData(storeKey, ConfigConst.DEFAULT_QOS, data);
+				}
+			}
 
-            if (channelTopic != null) {
-                String storeKey = channelTopic + ":store";
+			if (this.coapClient != null && resourceName != null) {
+				try {
+					String jsonData = DataUtil.getInstance().sensorDataToJson(data);
 
-                this.redisClient.storeData(storeKey, ConfigConst.DEFAULT_QOS, data);
-            }
-        }
+					_Logger.info("Forwarding SensorData over CoAP PUT: " + jsonData);
 
-		return true;
-    }
+					this.coapClient.sendPutRequest(
+						resourceName,
+						null,
+						true,
+						jsonData,
+						5
+					);
+				} catch (Exception e) {
+					_Logger.warning("Failed to forward SensorData over CoAP. Message: " + e.getMessage());
+				}
+			}
 
-    	return false;
+			return true;
+		}
+
+		return false;
 	}
 
 	@Override
@@ -211,8 +246,12 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		return false;
 	}
 	
+	@Override
 	public void setActuatorDataListener(String name, IActuatorDataListener listener)
 	{
+		if (listener != null) {
+			this.actuatorDataListener = listener;
+		}
 	}
 	
 	public void startManager()
@@ -258,6 +297,13 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				this.redisClient.subscribeToChannel(this, ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
 			}
 		}
+		if (this.enableCoapServer && this.coapServer != null) {
+			if (this.coapServer.startServer()) {
+				_Logger.info("CoAP server started.");
+			} else {
+				_Logger.severe("Failed to start CoAP server. Check log file for details.");
+			}
+		}
 	}
 	
 	public void stopManager()
@@ -280,7 +326,15 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 		if (this.redisClient != null) {
 			this.redisClient.disconnectClient();
-		}		
+		}	
+		
+		if (this.enableCoapServer && this.coapServer != null) {
+			if (this.coapServer.stopServer()) {
+				_Logger.info("CoAP server stopped.");
+			} else {
+				_Logger.severe("Failed to stop CoAP server. Check log file for details.");
+			}
+		}
 	}
 	//Lab5 Optional
 	@Override
@@ -345,11 +399,15 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			this.mqttClient.setDataMessageListener(this);
 		}
 	
-		
 		if (this.enableCoapServer) {
-			// TODO: implement this in Lab Module 8
+			this.coapServer = new CoapServerGateway(this);
 		}
 		
+		if (this.enableCoapClient) {
+			this.coapClient = new CoapClientConnector();
+			this.coapClient.setDataMessageListener(this);
+		}
+
 		if (this.enableCloudClient) {
 			// TODO: implement this in Lab Module 10
 		}

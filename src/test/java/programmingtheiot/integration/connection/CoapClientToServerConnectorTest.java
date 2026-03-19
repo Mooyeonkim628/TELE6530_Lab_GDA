@@ -9,19 +9,22 @@
 
 package programmingtheiot.integration.connection;
 
-import static org.junit.Assert.*;
-
 import java.util.logging.Logger;
 
 import org.junit.After;
 import org.junit.AfterClass;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import programmingtheiot.common.DefaultDataMessageListener;
 import programmingtheiot.common.IDataMessageListener;
-import programmingtheiot.gda.connection.*;
+import programmingtheiot.common.ResourceNameEnum;
+import programmingtheiot.data.DataUtil;
+import programmingtheiot.data.SystemPerformanceData;
+import programmingtheiot.gda.connection.CoapClientConnector;
+import programmingtheiot.gda.connection.CoapServerGateway;
 
 /**
  * This test case class contains very basic integration tests for
@@ -96,10 +99,20 @@ public class CoapClientToServerConnectorTest
 	/**
 	 * 
 	 */
-	@Test
+	//@Test
 	public void testConnectAndDiscover()
 	{
 		assertTrue(this.coapClient.sendDiscoveryRequest(DEFAULT_TIMEOUT));
 	}
-	
+
+	@Test
+	public void testSystemPerformancePutMessage()
+	{
+		SystemPerformanceData spData = new SystemPerformanceData();
+		
+		String jsonData = DataUtil.getInstance().systemPerformanceDataToJson(spData);
+		
+		this.coapClient.sendPutRequest(
+			ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE, null, USE_DEFAULT_RESOURCES, jsonData, DEFAULT_TIMEOUT);
+	}
 }

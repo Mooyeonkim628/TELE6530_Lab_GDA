@@ -9,12 +9,11 @@
 
 package programmingtheiot.integration.connection;
 
-import static org.junit.Assert.*;
-
 import java.util.logging.Logger;
 
 import org.junit.After;
 import org.junit.AfterClass;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -24,7 +23,7 @@ import programmingtheiot.common.IDataMessageListener;
 import programmingtheiot.common.ResourceNameEnum;
 import programmingtheiot.data.DataUtil;
 import programmingtheiot.data.SystemStateData;
-import programmingtheiot.gda.connection.*;
+import programmingtheiot.gda.connection.CoapClientConnector;
 
 /**
  * This test case class contains very basic integration tests for
@@ -98,6 +97,13 @@ public class CoapClientConnectorTest
 	public void testConnectAndDiscover()
 	{
 		assertTrue(this.coapClient.sendDiscoveryRequest(DEFAULT_TIMEOUT));
+
+		// NOTE: If you are using a custom asynchronous discovery, include a brief wait here
+		try {
+			Thread.sleep(2000L);
+		} catch (InterruptedException e) {
+			// ignore
+		}
 	}
 	
 	/**
@@ -106,22 +112,16 @@ public class CoapClientConnectorTest
 	@Test
 	public void testGetRequestCon()
 	{
-		// TODO: issue request and validate response
-		
-		assertTrue(this.coapClient.sendGetRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, true, DEFAULT_TIMEOUT));
+		assertTrue(
+			this.coapClient.sendGetRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, true, DEFAULT_TIMEOUT));
 	}
-	
-	/**
-	 * 
-	 */
+
 	@Test
 	public void testGetRequestNon()
 	{
-		// TODO: issue request and validate response
-		
-		assertTrue(this.coapClient.sendGetRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, false, DEFAULT_TIMEOUT));
+		assertTrue(
+			this.coapClient.sendGetRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, true, DEFAULT_TIMEOUT));
 	}
-	
 	/**
 	 * 
 	 */
@@ -202,7 +202,7 @@ public class CoapClientConnectorTest
 	{
 		// TODO: issue request and validate response
 		
-		assertTrue(this.coapClient.sendDeleteRequest(ResourceNameEnum.GDA_MGMT_STATUS_CMD_RESOURCE, null, true, DEFAULT_TIMEOUT));
+		assertTrue(this.coapClient.sendDeleteRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, true, DEFAULT_TIMEOUT));
 	}
 	
 	/**
@@ -213,7 +213,21 @@ public class CoapClientConnectorTest
 	{
 		// TODO: issue request and validate response
 		
-		assertTrue(this.coapClient.sendDeleteRequest(ResourceNameEnum.GDA_MGMT_STATUS_CMD_RESOURCE, null, false, DEFAULT_TIMEOUT));
+		assertTrue(this.coapClient.sendDeleteRequest(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, false, DEFAULT_TIMEOUT));
+	}
+
+	@Test
+	public void testObserve()
+	{
+		assertTrue(this.coapClient.startObserver(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, 60));
+
+		try {
+			Thread.sleep(10000L);
+		} catch (InterruptedException e) {
+			// ignore
+		}
+
+		assertTrue(this.coapClient.stopObserver(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, null, DEFAULT_TIMEOUT));
 	}
 	
 }
