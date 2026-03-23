@@ -40,14 +40,14 @@ enableCrypt    = True
 #
 [Mqtt.GatewayService]
 credFile       = ./cred/PiotMqttCred.props
-certFile       = ./cert/PiotMqttLocalCertFile.pem
+certFile       = ./certs/ca.crt
 host           = localhost
 port           = 1883
 securePort     = 8883
 defaultQoS     = 0
 keepAlive      = 60
 enableAuth     = False
-enableCrypt    = False
+enableCrypt    = True
 useAsyncClient = False
 
 #
@@ -79,9 +79,9 @@ enableCrypt = False
 deviceLocationID        = gatewaydevice001
 enableLogging           = True
 pollCycleSecs           = 5
-enableMqttClient        = False
-enableCoapServer        = True
-enableCoapClient        = True
+enableMqttClient        = True
+enableCoapServer        = False
+enableCoapClient        = False
 enableCloudClient       = False
 enableSmtpClient        = False
 enablePersistenceClient = False
@@ -89,4 +89,10 @@ enableSystemPerformance = True
 testGdaDataPath         = /tmp/gda-data
 testCdaDataPath         = /tmp/cda-data
 testEmptyApp            = False
-enableRunForever = True
+enableRunForever        = True
+
+handleHumidityChangeOnDevice=true
+humidityMaxTimePastThreshold=5
+nominalHumiditySetting=40.0
+triggerHumidifierFloor=35.0
+triggerHumidifierCeiling=45.0

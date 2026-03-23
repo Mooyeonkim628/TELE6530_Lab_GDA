@@ -11,6 +11,7 @@
 
 package programmingtheiot.gda.app;
 
+import java.time.OffsetDateTime;
 import java.util.logging.Logger;
 
 import programmingtheiot.common.ConfigConst;
@@ -19,6 +20,7 @@ import programmingtheiot.common.IActuatorDataListener;
 import programmingtheiot.common.IDataMessageListener;
 import programmingtheiot.common.ResourceNameEnum;
 import programmingtheiot.data.ActuatorData;
+import programmingtheiot.data.BaseIotData;
 import programmingtheiot.data.DataUtil;
 import programmingtheiot.data.SensorData;
 import programmingtheiot.data.SystemPerformanceData;
@@ -63,6 +65,28 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private RedisPersistenceAdapter redisClient = null;
 	private volatile boolean isRedisSubscribed = false;
 	private CoapClientConnector coapClient = null;
+
+	private boolean handleHumidityChangeOnDevice = false;
+
+	private int humidityMaxTimePastThreshold = 0;
+	private float nominalHumiditySetting = 0.0f;
+	private float triggerHumidifierFloor = 0.0f;
+	private float triggerHumidifierCeiling = 0.0f;
+
+	private SensorData lastHumiditySensorData = null;
+	private ActuatorData lastHumidifierActuatorCommand = null;
+	private ActuatorData lastHumidifierActuatorResponse = null;
+
+	private long humidityThresholdStartTime = 0L;
+	private boolean humidityAboveCeiling = false;
+	private boolean humidityBelowFloor = false;
+
+	private SensorData latestHumiditySensorData = null;
+	private OffsetDateTime latestHumiditySensorTimeStamp = null;
+	private ActuatorData latestHumidifierActuatorData = null;
+	private int lastKnownHumidifierCommand = ConfigConst.DEFAULT_COMMAND;
+	private static final int NO_PENDING_COMMAND = -1;
+	private int pendingHumidifierCommand = NO_PENDING_COMMAND;
 	// constructors
 	
 	public DeviceDataManager()
@@ -92,6 +116,35 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				ConfigConst.GATEWAY_DEVICE,
 				ConfigConst.ENABLE_COAP_CLIENT_KEY);
 
+		this.handleHumidityChangeOnDevice =
+			ConfigUtil.getInstance().getBoolean(
+				ConfigConst.GATEWAY_DEVICE,
+				"handleHumidityChangeOnDevice"
+			);
+
+		this.humidityMaxTimePastThreshold =
+			ConfigUtil.getInstance().getInteger(
+				ConfigConst.GATEWAY_DEVICE,
+				"humidityMaxTimePastThreshold"
+			);
+
+		this.nominalHumiditySetting =
+			ConfigUtil.getInstance().getFloat(
+				ConfigConst.GATEWAY_DEVICE,
+				"nominalHumiditySetting"
+			);
+
+		this.triggerHumidifierFloor =
+			ConfigUtil.getInstance().getFloat(
+				ConfigConst.GATEWAY_DEVICE,
+				"triggerHumidifierFloor"
+			);
+
+		this.triggerHumidifierCeiling =
+			ConfigUtil.getInstance().getFloat(
+				ConfigConst.GATEWAY_DEVICE,
+				"triggerHumidifierCeiling"
+			);
 		initManager();
 	}
 	
@@ -120,6 +173,15 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.warning("Error flag set for ActuatorData instance.");
 			}
 
+			if (isHumidifierActuatorData(data) && !data.hasError()) {
+				this.lastHumidifierActuatorResponse = data;
+				this.latestHumidifierActuatorData = data;
+				this.lastKnownHumidifierCommand = data.getCommand();
+				this.pendingHumidifierCommand = NO_PENDING_COMMAND;
+
+				_Logger.info("Updated humidifier state from actuator response. command=" + data.getCommand());
+			}
+
 			if (this.actuatorDataListener != null) {
 				this.actuatorDataListener.onActuatorDataUpdate(data);
 			}
@@ -130,8 +192,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 					this.redisClient.storeData(topic, ConfigConst.DEFAULT_QOS, data);
 				}
 			}
+
 			return true;
 		}
+
 		return false;
 	}
 
@@ -172,6 +236,17 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			resourceName + ", data=" + ((data != null) ? data.getName() : "null"));
 	}
 
+	private void handleIncomingDataAnalysis(ResourceNameEnum resourceName, SensorData data)
+	{
+		if (data == null) {
+			return;
+		}
+
+		if (data.getTypeID() == ConfigConst.HUMIDITY_SENSOR_TYPE) {
+			handleHumiditySensorAnalysis(resourceName, data);
+		}
+	}
+
 	private boolean handleUpstreamTransmission(ResourceNameEnum resourceName, String jsonData, int qos)
 	{
 		_Logger.fine("handleUpstreamTransmission() called. resource=" + resourceName +
@@ -188,6 +263,13 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 			if (data.hasError()) {
 				_Logger.warning("Error flag set for SensorData instance.");
+			}
+
+			// incoming sensor data analysis
+			try {
+				handleIncomingDataAnalysis(resourceName, data);
+			} catch (Exception e) {
+				_Logger.warning("Failed to analyze SensorData. Message: " + e.getMessage());
 			}
 
 			if (this.redisClient != null && resourceName != null) {
@@ -222,7 +304,6 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 		return false;
 	}
-
 	@Override
 	public boolean handleSystemPerformanceMessage(ResourceNameEnum resourceName, SystemPerformanceData data)
 	{
@@ -246,6 +327,229 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		return false;
 	}
 	
+	private void handleHumidityDataAnalysis(SensorData data)
+	{
+		if (!this.handleHumidityChangeOnDevice) {
+			return;
+		}
+
+		float humidity = data.getValue();
+		long now = System.currentTimeMillis();
+
+		this.lastHumiditySensorData = data;
+
+		_Logger.info("Humidity analysis - current value: " + humidity);
+
+		if (humidity >= this.triggerHumidifierFloor && humidity <= this.triggerHumidifierCeiling) {
+			this.humidityThresholdStartTime = 0L;
+			this.humidityAboveCeiling = false;
+			this.humidityBelowFloor = false;
+			return;
+		}
+
+		if (this.humidityThresholdStartTime == 0L) {
+			this.humidityThresholdStartTime = now;
+			this.humidityAboveCeiling = humidity > this.triggerHumidifierCeiling;
+			this.humidityBelowFloor = humidity < this.triggerHumidifierFloor;
+			return;
+		}
+
+		long elapsedSec = (now - this.humidityThresholdStartTime) / 1000L;
+
+		if (elapsedSec < this.humidityMaxTimePastThreshold) {
+			return;
+		}
+
+
+		if (humidity > this.triggerHumidifierCeiling) {
+			sendHumidifierActuationCommand(false);
+			resetHumidityThresholdState();
+		}
+
+		else if (humidity < this.triggerHumidifierFloor) {
+			sendHumidifierActuationCommand(true);
+			resetHumidityThresholdState();
+		}
+	}
+
+	private void handleHumiditySensorAnalysis(ResourceNameEnum resourceName, SensorData data)
+	{
+		float humidity = data.getValue();
+		_Logger.info("Analyzing humidity data: " + humidity);
+
+		boolean isLow = humidity < this.triggerHumidifierFloor;
+		boolean isHigh = humidity > this.triggerHumidifierCeiling;
+		boolean isNominal = !isLow && !isHigh;
+
+		OffsetDateTime currentTimeStamp = getDateTimeFromData(data);
+
+		if (isNominal) {
+			this.latestHumiditySensorData = null;
+			this.latestHumiditySensorTimeStamp = null;
+
+			_Logger.info(
+				"OFF check -> humidity=" + humidity +
+				", nominal=" + this.nominalHumiditySetting +
+				", lastKnown=" + this.lastKnownHumidifierCommand +
+				", pending=" + this.pendingHumidifierCommand
+			);
+
+			if (this.lastKnownHumidifierCommand == ConfigConst.ON_COMMAND &&
+				this.pendingHumidifierCommand != ConfigConst.OFF_COMMAND &&
+				humidity >= this.nominalHumiditySetting) {
+
+				ActuatorData offCommand = createHumidifierActuatorData(data, ConfigConst.OFF_COMMAND);
+
+				_Logger.info("Humidity back to nominal. Sending OFF command.");
+
+				if (sendActuatorCommandtoCda(ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE, offCommand)) {
+					this.pendingHumidifierCommand = ConfigConst.OFF_COMMAND;
+				}
+			}
+
+			return;
+		}
+
+		if (this.latestHumiditySensorData == null) {
+			this.latestHumiditySensorData = data;
+			this.latestHumiditySensorTimeStamp = currentTimeStamp;
+
+			_Logger.info(
+				"Humidity moved outside nominal range. Starting threshold timer for " +
+				this.humidityMaxTimePastThreshold + " seconds."
+			);
+
+			return;
+		}
+
+		float prevHumidity = this.latestHumiditySensorData.getValue();
+		boolean prevWasLow = prevHumidity < this.triggerHumidifierFloor;
+		boolean prevWasHigh = prevHumidity > this.triggerHumidifierCeiling;
+
+		if ((isLow && !prevWasLow) || (isHigh && !prevWasHigh)) {
+			this.latestHumiditySensorData = data;
+			this.latestHumiditySensorTimeStamp = currentTimeStamp;
+
+			_Logger.info("Humidity direction changed. Restarting threshold timer.");
+			return;
+		}
+
+		long diffSeconds = java.time.temporal.ChronoUnit.SECONDS.between(
+			this.latestHumiditySensorTimeStamp,
+			currentTimeStamp
+		);
+
+		_Logger.info("Humidity threshold delta seconds: " + diffSeconds);
+
+		if (diffSeconds < this.humidityMaxTimePastThreshold) {
+			return;
+		}
+
+		int desiredCommand = isLow ? ConfigConst.ON_COMMAND : ConfigConst.OFF_COMMAND;
+
+		if (desiredCommand == this.lastKnownHumidifierCommand ||
+			desiredCommand == this.pendingHumidifierCommand) {
+			_Logger.info("Desired humidifier command is already active or pending. Skipping duplicate command.");
+			this.latestHumiditySensorData = null;
+			this.latestHumiditySensorTimeStamp = null;
+			return;
+		}
+
+		ActuatorData ad = createHumidifierActuatorData(data, desiredCommand);
+
+		_Logger.info("Humidity threshold exceeded long enough. Sending actuator command: " + ad);
+
+		if (sendActuatorCommandtoCda(ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE, ad)) {
+			this.pendingHumidifierCommand = desiredCommand;
+		}
+
+		this.latestHumiditySensorData = null;
+		this.latestHumiditySensorTimeStamp = null;
+	}
+
+	private void resetHumidityThresholdState()
+	{
+		this.humidityThresholdStartTime = 0L;
+		this.humidityAboveCeiling = false;
+		this.humidityBelowFloor = false;
+	}
+
+	private boolean sendHumidifierActuationCommand(boolean enableHumidifier)
+	{
+		ActuatorData ad = new ActuatorData();
+
+		ad.setName("Humidifier");
+		ad.setValue(enableHumidifier ? 1.0f : 0.0f);
+
+		this.lastHumidifierActuatorCommand = ad;
+
+		_Logger.info("Sending humidifier actuator command: " + ad.getValue());
+
+		String jsonData = DataUtil.getInstance().actuatorDataToJson(ad);
+
+		if (this.mqttClient != null) {
+			return this.mqttClient.publishMessage(
+				ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE,
+				jsonData,
+				ConfigConst.DEFAULT_QOS
+			);
+		}
+
+		return false;
+	}
+
+	private boolean sendActuatorCommandtoCda(ResourceNameEnum resourceName, ActuatorData data)
+	{
+		if (this.actuatorDataListener != null) {
+			this.actuatorDataListener.onActuatorDataUpdate(data);
+		}
+
+		if (this.enableMqttClient && this.mqttClient != null) {
+			String jsonData = DataUtil.getInstance().actuatorDataToJson(data);
+
+			if (this.mqttClient.publishMessage(resourceName, jsonData, ConfigConst.DEFAULT_QOS)) {
+				_Logger.info("Published ActuatorData command from GDA to CDA: " + data.getCommand());
+				return true;
+			} else {
+				_Logger.warning("Failed to publish ActuatorData command from GDA to CDA: " + data.getCommand());
+			}
+		}
+
+		return false;
+	}
+	
+	private boolean isHumidifierActuatorData(ActuatorData data)
+	{
+		return data != null &&
+			(
+				data.getTypeID() == ConfigConst.HUMIDIFIER_ACTUATOR_TYPE ||
+				ConfigConst.HUMIDIFIER_ACTUATOR_NAME.equalsIgnoreCase(data.getName())
+			);
+	}
+
+	private ActuatorData createHumidifierActuatorData(SensorData sensorData, int command)
+	{
+		ActuatorData ad = new ActuatorData();
+
+		ad.setName(ConfigConst.HUMIDIFIER_ACTUATOR_NAME);
+		ad.setLocationID(sensorData.getLocationID());
+		ad.setTypeID(ConfigConst.HUMIDIFIER_ACTUATOR_TYPE);
+		ad.setValue(this.nominalHumiditySetting);
+		ad.setCommand(command);
+
+		return ad;
+	}
+
+	private OffsetDateTime getDateTimeFromData(BaseIotData data)
+	{
+		try {
+			return OffsetDateTime.parse(data.getTimeStamp());
+		} catch (Exception e) {
+			_Logger.warning("Failed to parse timestamp from data. Using current time.");
+			return OffsetDateTime.now();
+		}
+	}
+
 	@Override
 	public void setActuatorDataListener(String name, IActuatorDataListener listener)
 	{
@@ -257,6 +561,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	public void startManager()
 	{
 		_Logger.info("Starting DeviceDataManager...");
+
 		if (this.sysPerfMgr != null) {
 			this.sysPerfMgr.startManager();
 		}
@@ -264,32 +569,16 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		if (this.mqttClient != null) {
 			if (this.mqttClient.connectClient()) {
 				_Logger.info("Successfully connected MQTT client to broker.");
-				
-				// add necessary subscriptions
-				
-				// TODO: read this from the configuration file
-				int qos = ConfigConst.DEFAULT_QOS;
-				
-				// TODO: check the return value for each and take appropriate action
-				
-				// IMPORTANT NOTE: The 'subscribeToTopic()' method calls shown
-				// below will be moved to MqttClientConnector.connectComplete()
-				// in Lab Module 10. For now, they can remain here.
-				this.mqttClient.subscribeToTopic(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE, qos);
-				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE, qos);
-				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, qos);
-				this.mqttClient.subscribeToTopic(ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE, qos);
 			} else {
 				_Logger.severe("Failed to connect MQTT client to broker.");
-				
-				// TODO: take appropriate action
 			}
 		}
-	
-	    if (this.redisClient != null) {
-        	boolean ok = this.redisClient.connectClient();
-			 _Logger.info("Redis connectClient(): " + ok);
-			if (ok && !isRedisSubscribed) { 
+
+		if (this.redisClient != null) {
+			boolean ok = this.redisClient.connectClient();
+			_Logger.info("Redis connectClient(): " + ok);
+
+			if (ok && !isRedisSubscribed) {
 				isRedisSubscribed = true;
 				_Logger.info("Subscribing to Redis channel: " +
 					ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName());
@@ -297,6 +586,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				this.redisClient.subscribeToChannel(this, ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
 			}
 		}
+
 		if (this.enableCoapServer && this.coapServer != null) {
 			if (this.coapServer.startServer()) {
 				_Logger.info("CoAP server started.");
