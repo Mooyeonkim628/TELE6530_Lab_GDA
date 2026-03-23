@@ -12,3 +12,12 @@ certs/*.key
 *.csr
 *.srl
 cred/*.props
+
+.vscode/
+certs/
+gatewaydevice001-*/
+*.crt
+*.key
+*.csr
+*.srl
+cred/*.props
