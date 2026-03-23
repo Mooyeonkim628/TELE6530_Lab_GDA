@@ -2,3 +2,13 @@
 /target/
 **/cert
 **/cred
+certs/*.crt
+certs/*.key
+cred/*.props
+certs/*.crt
+certs/*.key
+*.crt
+*.key
+*.csr
+*.srl
+cred/*.props
