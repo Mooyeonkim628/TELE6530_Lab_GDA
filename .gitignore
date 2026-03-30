@@ -7,6 +7,8 @@ certs/*.key
 cred/*.props
 certs/*.crt
 certs/*.key
+certs/*.pem
+certs/*.props
 *.crt
 *.key
 *.csr

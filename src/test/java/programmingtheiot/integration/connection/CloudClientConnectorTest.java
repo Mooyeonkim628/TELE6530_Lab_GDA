@@ -1,202 +1,139 @@
-/**
- * 
- * This class is part of the Programming the Internet of Things
- * project, and is available via the MIT License, which can be
- * found in the LICENSE file at the top level of this repository.
- * 
- * Copyright (c) 2020 - 2025 by Andrew D. King
- */ 
-
 package programmingtheiot.integration.connection;
 
-import static org.junit.Assert.*;
-
-import java.util.List;
 import java.util.logging.Logger;
 
 import org.junit.After;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.Test;
 
 import programmingtheiot.common.ConfigConst;
-import programmingtheiot.common.DefaultDataMessageListener;
 import programmingtheiot.common.ResourceNameEnum;
 import programmingtheiot.data.SensorData;
-import programmingtheiot.data.SystemPerformanceData;
 import programmingtheiot.gda.app.DeviceDataManager;
-import programmingtheiot.gda.connection.*;
+import programmingtheiot.gda.connection.CloudClientFactory;
+import programmingtheiot.gda.connection.ICloudClient;
 
-/**
- * This test case class contains very basic integration tests for
- * CloudClientConnector. It should not be considered complete,
- * but serve as a starting point for the student implementing
- * additional functionality within their Programming the IoT
- * environment.
- *
- */
 public class CloudClientConnectorTest
 {
-	// static
-	
 	private static final Logger _Logger =
 		Logger.getLogger(CloudClientConnectorTest.class.getName());
-	
-	
-	// member var's
-	
-	private List<ICloudClient> cloudClientList = null;
+
 	private ICloudClient cloudClient = null;
-	
-	
-	// test setup methods
-	
-	/**
-	 * @throws java.lang.Exception
-	 */
+
 	@Before
 	public void setUp() throws Exception
 	{
-		this.cloudClient = new CloudClientConnector();
+		this.cloudClient = CloudClientFactory.getInstance().createCloudClient();
+
+		assertNotNull(
+			"Cloud client should not be null after factory creation.",
+			this.cloudClient
+		);
 	}
-	
-	/**
-	 * @throws java.lang.Exception
-	 */
+
 	@After
 	public void tearDown() throws Exception
 	{
-	}
-	
-	// test methods
-	
-	/**
-	 * Test method for {@link programmingtheiot.gda.connection.UbidotsMqttCloudClientConnector#connectClient()}.
-	 */
-//	@Test
-	public void testCloudClientConnectAndDisconnect()
-	{
-		this.cloudClient.setDataMessageListener(new DefaultDataMessageListener());
-		
-		assertTrue(this.cloudClient.connectClient());
-		
-		try {
-			// sleep for a minute or so...
-			
-			Thread.sleep(60000L);
-		} catch (Exception e) {
-			// ignore
+		if (this.cloudClient != null) {
+			try {
+				this.cloudClient.disconnectClient();
+			} catch (Exception e) {
+				_Logger.warning("Error during cloud client disconnect: " + e.getMessage());
+			}
 		}
-		
-		assertTrue(this.cloudClient.disconnectClient());
-		
-		_Logger.info("Test complete.");
 	}
-	
-	/**
-	 * Test method
-	 */
+
 	@Test
-	public void testIntegratedCloudClientConnectAndDisconnect()
+	public void testIntegratedConnectDisconnect()
 	{
-		DeviceDataManager ddm = new DeviceDataManager();
-		ddm.startManager();
-		
-		try {
-			// sleep for a minute or so...
-			
-			Thread.sleep(60000L);
-		} catch (Exception e) {
-			// ignore
-		}
-		
-		ddm.stopManager();
-		
-		_Logger.info("Test complete.");
+		boolean connected = this.cloudClient.connectClient();
+
+		assertTrue(
+			"Cloud client should connect successfully.",
+			connected
+		);
+
+		boolean disconnected = this.cloudClient.disconnectClient();
+
+		assertTrue(
+			"Cloud client should disconnect successfully.",
+			disconnected
+		);
 	}
-	
-	/**
-	 * Test method for {@link programmingtheiot.gda.connection.UbidotsMqttCloudClientConnector#publishMessage(programmingtheiot.common.ResourceNameEnum, java.lang.String, int)}.
-	 */
-//	@Test
-	public void testPublishAndSubscribe()
+
+	@Test
+	public void testCloudClientPublishSensorDataToCloud()
 	{
-		this.cloudClient.setDataMessageListener(new DefaultDataMessageListener());
-		
-		assertTrue(this.cloudClient.connectClient());
-		
-		try {
-			// sleep for a couple of seconds or so...
-			// 
-			// TODO: if cloudClient delegates to MqttClientConnector,
-			// which in turn delegates to MqttAsyncClient, the timing
-			// of the sleep cycle may need to be manually adjusted to
-			// allow the connection to complete
-			
-			Thread.sleep(2000L);
-		} catch (Exception e) {
-			// ignore
-		}
-		
+		boolean connected = this.cloudClient.connectClient();
+
+		assertTrue(
+			"Cloud client should connect successfully before publish.",
+			connected
+		);
+
 		SensorData sensorData = new SensorData();
-		sensorData.setName(ConfigConst.TEMP_SENSOR_NAME);
-		sensorData.setValue(92.0f);
-		
-		SystemPerformanceData sysPerfData = new SystemPerformanceData();
-		sysPerfData.setCpuUtilization(34.7f);
-		sysPerfData.setMemoryUtilization(39.8f);
-		
-		assertTrue(this.cloudClient.subscribeToCloudEvents(ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE));
-		
-		try {
-			// sleep for a few seconds...
-			// 
-			// TODO: if cloudClient delegates to MqttClientConnector,
-			// which in turn delegates to MqttAsyncClient, the timing
-			// of the sleep cycle may need to be manually adjusted to
-			// allow the connection to complete (even though the method
-			// call may assume success if using an async connect)
-			
-			Thread.sleep(5000L);
-		} catch (Exception e) {
-			// ignore
-		}
-		
-		assertTrue(this.cloudClient.sendEdgeDataToCloud(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, sensorData));
-		assertTrue(this.cloudClient.sendEdgeDataToCloud(ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE, sysPerfData));
-		
-		try {
-			// sleep for half a minute or so...
-			
-			Thread.sleep(30000L);
-		} catch (Exception e) {
-			// ignore
-		}
-		
-		assertTrue(this.cloudClient.unsubscribeFromCloudEvents(ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE));
+		sensorData.setName("TestTemperatureSensor");
+		sensorData.setTypeID(ConfigConst.TEMP_SENSOR_TYPE);
+		sensorData.setLocationID("GDA_TEST_DEVICE");
+		sensorData.setValue(23.5f);
 
-		try {
-			// sleep for a minute or so...
-			
-			Thread.sleep(50000L);
-		} catch (Exception e) {
-			// ignore
-		}
+		boolean published =
+			this.cloudClient.sendEdgeDataToCloud(
+				ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE,
+				sensorData
+			);
 
-		assertTrue(this.cloudClient.disconnectClient());
-
-		try {
-			// sleep for a couple of seconds or so...
-			// 
-			// TODO: if cloudClient delegates to MqttClientConnector,
-			// which in turn delegates to MqttAsyncClient, the timing
-			// of the sleep cycle may need to be manually adjusted to
-			// allow the disconnect to complete (even though the method
-			// call may assume success if using an async disconnect)
-			
-			Thread.sleep(2000L);
-		} catch (Exception e) {
-			// ignore
-		}
+		assertTrue(
+			"Cloud client should publish SensorData successfully.",
+			published
+		);
 	}
-	
+
+	@Test
+	public void testCloudClientThresholdCrossingAndActuationEvent() throws Exception
+	{
+		DeviceDataManager deviceDataManager = new DeviceDataManager();
+
+		deviceDataManager.startManager();
+
+		SensorData humidityData1 = new SensorData();
+		humidityData1.setName("TestHumiditySensor");
+		humidityData1.setTypeID(ConfigConst.HUMIDITY_SENSOR_TYPE);
+		humidityData1.setLocationID("GDA_TEST_DEVICE");
+		humidityData1.setValue(20.0f);
+
+		boolean handled1 =
+			deviceDataManager.handleSensorMessage(
+				ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE,
+				humidityData1
+			);
+
+		assertTrue(
+			"DeviceDataManager should handle first humidity sensor message.",
+			handled1
+		);
+
+		Thread.sleep(6000);
+
+		SensorData humidityData2 = new SensorData();
+		humidityData2.setName("TestHumiditySensor");
+		humidityData2.setTypeID(ConfigConst.HUMIDITY_SENSOR_TYPE);
+		humidityData2.setLocationID("GDA_TEST_DEVICE");
+		humidityData2.setValue(20.0f);
+
+		boolean handled2 =
+			deviceDataManager.handleSensorMessage(
+				ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE,
+				humidityData2
+			);
+
+		assertTrue(
+			"DeviceDataManager should handle second humidity sensor message.",
+			handled2
+		);
+
+		deviceDataManager.stopManager();
+	}
 }

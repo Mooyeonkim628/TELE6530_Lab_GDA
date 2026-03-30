@@ -11,18 +11,38 @@
 # Cloud client configuration information
 #
 [Cloud.GatewayService]
-credFile       = ./cred/PiotCloudCred.props
-certFile       = ./cert/PiotCloudCert.pem
-host           = localhost
-port           = 1883
-securePort     = 8883
-defaultQoS     = 0
-keepAlive      = 60
-useAsyncClient = True
-enableAuth     = True
-enableCrypt    = True
-baseUrl        = 
-baseTopic      = 
+cloudServiceName = Ubidots
+
+[Cloud.GatewayService.AWS]
+credFile         = ./cred/AwsCloudCred.props
+certFile         = ./certs/AwsCloudCert.pem
+privateKeyFile   = ./certs/AwsCloudKey.key
+cloudServiceName = AWS
+host             = {TODO: hostname}
+port             = 1883
+securePort       = 8883
+defaultQoS       = 0
+keepAlive        = 30
+useAsyncClient   = True
+enableAuth       = True
+enableCrypt      = True
+baseUrl          =
+baseTopic        =
+
+[Cloud.GatewayService.Ubidots]
+credFile         = ./cred/UbidotsCloudCred.props
+certFile         = ./certs/UbidotsCloudCert.pem
+cloudServiceName = Ubidots
+host             = industrial.api.ubidots.com
+port             = 1883
+securePort       = 8883
+defaultQoS       = 0
+keepAlive        = 30
+useAsyncClient   = True
+enableAuth       = True
+enableCrypt      = True
+baseUrl          =
+baseTopic        = /v1.6/devices/
 
 #
 # SMTP client configuration information
@@ -40,12 +60,12 @@ enableCrypt    = True
 #
 [Mqtt.GatewayService]
 credFile       = ./cred/PiotMqttCred.props
-certFile       = ./certs/ca.crt
+certFile       = ./certs/server.crt
 host           = localhost
 port           = 1883
 securePort     = 8883
 defaultQoS     = 0
-keepAlive      = 60
+keepAlive      = 30
 enableAuth     = False
 enableCrypt    = True
 useAsyncClient = False
@@ -82,7 +102,7 @@ pollCycleSecs           = 5
 enableMqttClient        = True
 enableCoapServer        = False
 enableCoapClient        = False
-enableCloudClient       = False
+enableCloudClient       = True
 enableSmtpClient        = False
 enablePersistenceClient = False
 enableSystemPerformance = True

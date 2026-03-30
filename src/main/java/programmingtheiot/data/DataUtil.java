@@ -68,13 +68,14 @@ public class DataUtil
 		return jsonData;
 	}
 	
-	public String actuatorDataToTimeAndValueJson(ActuatorData actuatorData)
+	public String actuatorDataToTimeAndValueJson(ActuatorData data)
 	{
 		String jsonData = null;
-
-		if (actuatorData != null) {
+		
+		if (data != null) {
 			Gson gson = new Gson();
-			jsonData = gson.toJson(new TimeAndValue(actuatorData.getTimeStamp(), actuatorData.getValue()));
+			TimeAndValuePayloadData tvData = new TimeAndValuePayloadData(data);
+			jsonData = gson.toJson(tvData);
 		}
 
 		return jsonData;
@@ -92,18 +93,19 @@ public class DataUtil
 		return jsonData;
 	}
 	
-	public String sensorDataToTimeAndValueJson(SensorData sensorData)
+	public String sensorDataToTimeAndValueJson(SensorData data)
 	{
 		String jsonData = null;
-
-		if (sensorData != null) {
+		
+		if (data != null) {
 			Gson gson = new Gson();
-			jsonData = gson.toJson(new TimeAndValue(sensorData.getTimeStamp(), sensorData.getValue()));
+			TimeAndValuePayloadData tvData = new TimeAndValuePayloadData(data);
+			jsonData = gson.toJson(tvData);
 		}
 
 		return jsonData;
 	}
-	
+		
 	public String systemPerformanceDataToJson(SystemPerformanceData sysPerfData)
 	{
 		String jsonData = null;

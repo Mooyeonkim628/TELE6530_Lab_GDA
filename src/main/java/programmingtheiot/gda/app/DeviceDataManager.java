@@ -1,17 +1,7 @@
-/**
- * This class is part of the Programming the Internet of Things
- * project, and is available via the MIT License, which can be
- * found in the LICENSE file at the top level of this repository.
- * 
- * You may find it more helpful to your design to adjust the
- * functionality, constants and interfaces (if there are any)
- * provided within in order to meet the needs of your specific
- * Programming the Internet of Things project.
- */
-
 package programmingtheiot.gda.app;
 
 import java.time.OffsetDateTime;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import programmingtheiot.common.ConfigConst;
@@ -25,8 +15,10 @@ import programmingtheiot.data.DataUtil;
 import programmingtheiot.data.SensorData;
 import programmingtheiot.data.SystemPerformanceData;
 import programmingtheiot.data.SystemStateData;
+import programmingtheiot.gda.connection.CloudClientConnector;
 import programmingtheiot.gda.connection.CoapClientConnector;
 import programmingtheiot.gda.connection.CoapServerGateway;
+import programmingtheiot.gda.connection.ICloudClient;
 import programmingtheiot.gda.connection.IPersistenceClient;
 import programmingtheiot.gda.connection.IPubSubClient;
 import programmingtheiot.gda.connection.IRequestResponseClient;
@@ -34,34 +26,27 @@ import programmingtheiot.gda.connection.MqttClientConnector;
 import programmingtheiot.gda.connection.RedisPersistenceAdapter;
 import programmingtheiot.gda.system.SystemPerformanceManager;
 import redis.clients.jedis.JedisPubSub;
-/**
- * Shell representation of class for student implementation.
- *
- */
+
 public class DeviceDataManager extends JedisPubSub implements IDataMessageListener
 {
-	// static
-	
 	private static final Logger _Logger =
 		Logger.getLogger(DeviceDataManager.class.getName());
-	
-	// private var's
-	
+
 	private boolean enableMqttClient = true;
 	private boolean enableCoapServer = false;
 	private boolean enableCloudClient = false;
 	private boolean enableSmtpClient = false;
 	private boolean enablePersistenceClient = false;
 	private boolean enableCoapClient = false;
-	
+
 	private IActuatorDataListener actuatorDataListener = null;
 	private IPubSubClient mqttClient = null;
-	private IPubSubClient cloudClient = null;
+	private ICloudClient cloudClient = null;
 	private IPersistenceClient persistenceClient = null;
 	private IRequestResponseClient smtpClient = null;
 	private CoapServerGateway coapServer = null;
 	private boolean enableSystemPerf = false;
-	private SystemPerformanceManager sysPerfMgr = null;	
+	private SystemPerformanceManager sysPerfMgr = null;
 	private RedisPersistenceAdapter redisClient = null;
 	private volatile boolean isRedisSubscribed = false;
 	private CoapClientConnector coapClient = null;
@@ -87,30 +72,29 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private int lastKnownHumidifierCommand = ConfigConst.DEFAULT_COMMAND;
 	private static final int NO_PENDING_COMMAND = -1;
 	private int pendingHumidifierCommand = NO_PENDING_COMMAND;
-	// constructors
-	
+
 	public DeviceDataManager()
 	{
 		super();
-		
+
 		ConfigUtil configUtil = ConfigUtil.getInstance();
-		
+
 		this.enableMqttClient =
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_MQTT_CLIENT_KEY);
-		
+
 		this.enableCoapServer =
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_COAP_SERVER_KEY);
-		
+
 		this.enableCloudClient =
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_CLOUD_CLIENT_KEY);
-		
+
 		this.enablePersistenceClient =
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE, ConfigConst.ENABLE_PERSISTENCE_CLIENT_KEY);
-		
+
 		this.enableCoapClient =
 			configUtil.getBoolean(
 				ConfigConst.GATEWAY_DEVICE,
@@ -145,9 +129,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				ConfigConst.GATEWAY_DEVICE,
 				"triggerHumidifierCeiling"
 			);
+
 		initManager();
 	}
-	
+
 	public DeviceDataManager(
 		boolean enableMqttClient,
 		boolean enableCoapClient,
@@ -156,13 +141,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		boolean enablePersistenceClient)
 	{
 		super();
-		
+
 		initConnections();
 	}
-	
-	
-	// public methods
-	
+
 	@Override
 	public boolean handleActuatorCommandResponse(ResourceNameEnum resourceName, ActuatorData data)
 	{
@@ -175,11 +157,9 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 			if (isHumidifierActuatorData(data) && !data.hasError()) {
 				this.lastHumidifierActuatorResponse = data;
-				this.latestHumidifierActuatorData = data;
-				this.lastKnownHumidifierCommand = data.getCommand();
-				this.pendingHumidifierCommand = NO_PENDING_COMMAND;
-
-				_Logger.info("Updated humidifier state from actuator response. command=" + data.getCommand());
+				this.latestHumidifierActuatorData   = data;
+				this.lastKnownHumidifierCommand      = data.getCommand();
+				this.pendingHumidifierCommand        = NO_PENDING_COMMAND;
 			}
 
 			if (this.actuatorDataListener != null) {
@@ -193,28 +173,77 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				}
 			}
 
+			if (this.cloudClient != null && resourceName != null && !data.hasError()) {
+				if (this.cloudClient.sendEdgeDataToCloud(resourceName, data)) {
+					_Logger.fine("Sent ActuatorData state to cloud: " + data.getName() + "=" + data.getCommand());
+				} else {
+					_Logger.warning("Failed to send ActuatorData state to cloud.");
+				}
+			}
+
 			return true;
 		}
-
 		return false;
 	}
-
+	
 	@Override
 	public boolean handleActuatorCommandRequest(ResourceNameEnum resourceName, ActuatorData data)
 	{
-		return false;
+		if (data != null) {
+			_Logger.log(
+				Level.FINE,
+				"Actuator request received: {0}. Message: {1}",
+				new Object[] {resourceName.getResourceName(), Integer.valueOf((data.getCommand()))});
+
+			if (data.hasError()) {
+				_Logger.warning("Error flag set for ActuatorData instance.");
+			}
+
+			this.sendActuatorCommandtoCda(resourceName, data);
+
+			return true;
+		} else {
+			return false;
+		}
 	}
 
 	@Override
 	public boolean handleIncomingMessage(ResourceNameEnum resourceName, String msg)
 	{
-		if (msg != null) {
-			_Logger.info("Handling incoming generic message: " + msg);
-			
-			return true;
-		} else {
-			return false;
+		if (resourceName != null && msg != null) {
+			_Logger.info("Handling incoming ActuatorData message: " + msg);
+
+			try {
+				ActuatorData ad = DataUtil.getInstance().jsonToActuatorData(msg);
+
+				if (ad == null) {
+					_Logger.warning("Failed to parse incoming ActuatorData JSON: " + msg);
+					return false;
+				}
+
+				String jsonData = DataUtil.getInstance().actuatorDataToJson(ad);
+
+				if (this.mqttClient != null) {
+					_Logger.info("Publishing data to MQTT broker: " + jsonData);
+
+					boolean ok = this.mqttClient.publishMessage(
+						ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE,
+						jsonData,
+						0
+					);
+
+					_Logger.info("Actuator publish to CDA result: " + ok);
+
+					return ok;
+				} else {
+					_Logger.warning("MQTT client is null. Cannot publish ActuatorData to CDA.");
+				}
+			} catch (Exception e) {
+				_Logger.warning("Failed to process incoming message: " + e.getMessage());
+			}
 		}
+
+		return false;
 	}
 
 	private void handleIncomingDataAnalysis(ResourceNameEnum resource, ActuatorData data)
@@ -247,12 +276,17 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		}
 	}
 
-	private boolean handleUpstreamTransmission(ResourceNameEnum resourceName, String jsonData, int qos)
+	private void handleUpstreamTransmission(ResourceNameEnum resource, SensorData data)
 	{
-		_Logger.fine("handleUpstreamTransmission() called. resource=" + resourceName +
-			", qos=" + qos + ", jsonData.len=" + ((jsonData != null) ? jsonData.length() : 0));
+		_Logger.fine("Sending SensorData upstream to cloud: " + resource);
 
-		return false;
+		if (this.cloudClient != null && resource != null && data != null) {
+			if (this.cloudClient.sendEdgeDataToCloud(resource, data)) {
+				_Logger.fine("Sent SensorData upstream to cloud.");
+			} else {
+				_Logger.warning("Failed to send SensorData upstream to cloud.");
+			}
+		}
 	}
 
 	@Override
@@ -265,7 +299,6 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.warning("Error flag set for SensorData instance.");
 			}
 
-			// incoming sensor data analysis
 			try {
 				handleIncomingDataAnalysis(resourceName, data);
 			} catch (Exception e) {
@@ -299,21 +332,29 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				}
 			}
 
+			handleUpstreamTransmission(resourceName, data);
+
 			return true;
 		}
 
 		return false;
 	}
+
 	@Override
 	public boolean handleSystemPerformanceMessage(ResourceNameEnum resourceName, SystemPerformanceData data)
 	{
 		if (data != null) {
 			_Logger.info("Handling system performance message: " + data.getName());
-			
+
+			if (resourceName == ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE) {
+				_Logger.info("Ignoring CDA system performance message in DeviceDataManager.");
+				return true;
+			}
+
 			if (data.hasError()) {
 				_Logger.warning("Error flag set for SystemPerformanceData instance.");
 			}
-			
+
 			if (this.redisClient != null) {
 				String topic = (resourceName != null) ? resourceName.getResourceName() : null;
 				if (topic != null) {
@@ -321,12 +362,19 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				}
 			}
 
+			if (this.cloudClient != null) {
+				if (this.cloudClient.sendEdgeDataToCloud(resourceName, data)) {
+					_Logger.fine("Sent SystemPerformanceData upstream to cloud.");
+				} else {
+					_Logger.warning("Failed to send SystemPerformanceData upstream to cloud.");
+				}
+			}
 			return true;
 		}
 
 		return false;
 	}
-	
+
 	private void handleHumidityDataAnalysis(SensorData data)
 	{
 		if (!this.handleHumidityChangeOnDevice) {
@@ -360,13 +408,10 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			return;
 		}
 
-
 		if (humidity > this.triggerHumidifierCeiling) {
 			sendHumidifierActuationCommand(false);
 			resetHumidityThresholdState();
-		}
-
-		else if (humidity < this.triggerHumidifierFloor) {
+		} else if (humidity < this.triggerHumidifierFloor) {
 			sendHumidifierActuationCommand(true);
 			resetHumidityThresholdState();
 		}
@@ -517,7 +562,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 		return false;
 	}
-	
+
 	private boolean isHumidifierActuatorData(ActuatorData data)
 	{
 		return data != null &&
@@ -557,7 +602,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			this.actuatorDataListener = listener;
 		}
 	}
-	
+
 	public void startManager()
 	{
 		_Logger.info("Starting DeviceDataManager...");
@@ -571,6 +616,14 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.info("Successfully connected MQTT client to broker.");
 			} else {
 				_Logger.severe("Failed to connect MQTT client to broker.");
+			}
+		}
+
+		if (this.cloudClient != null) {
+			if (this.cloudClient.connectClient()) {
+				_Logger.info("Successfully connected Cloud client.");
+			} else {
+				_Logger.warning("Failed to connect Cloud client.");
 			}
 		}
 
@@ -595,29 +648,40 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			}
 		}
 	}
-	
+
 	public void stopManager()
 	{
 		_Logger.info("Stopping DeviceDataManager...");
+
 		if (this.mqttClient != null) {
 			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.GDA_MGMT_STATUS_MSG_RESOURCE);
 			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE);
 			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE);
 			this.mqttClient.unsubscribeFromTopic(ResourceNameEnum.CDA_SYSTEM_PERF_MSG_RESOURCE);
-			
+
 			if (this.mqttClient.disconnectClient()) {
 				_Logger.info("Successfully disconnected MQTT client from broker.");
 			} else {
 				_Logger.severe("Failed to disconnect MQTT client from broker.");
 			}
-		}	
+		}
+
+		if (this.cloudClient != null) {
+			if (this.cloudClient.disconnectClient()) {
+				_Logger.info("Successfully disconnected Cloud client.");
+			} else {
+				_Logger.warning("Failed to disconnect Cloud client.");
+			}
+		}
+
 		if (this.sysPerfMgr != null) {
 			this.sysPerfMgr.stopManager();
 		}
+
 		if (this.redisClient != null) {
 			this.redisClient.disconnectClient();
-		}	
-		
+		}
+
 		if (this.enableCoapServer && this.coapServer != null) {
 			if (this.coapServer.stopServer()) {
 				_Logger.info("CoAP server stopped.");
@@ -626,7 +690,7 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 			}
 		}
 	}
-	//Lab5 Optional
+
 	@Override
 	public void onSubscribe(String channel, int subscribedChannels)
 	{
@@ -643,10 +707,11 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	public void onMessage(String channel, String message)
 	{
 		_Logger.info("Redis msg received. channel=" + channel + " payload=" + message);
-		
+
 		if (channel == null || message == null) {
 			return;
 		}
+
 		if (channel.equals(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE.getResourceName())) {
 			SensorData sd = DataUtil.getInstance().jsonToSensorData(message);
 
@@ -656,18 +721,8 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				_Logger.warning("Failed to parse SensorData from JSON.");
 			}
 		}
+	}
 
-		
-	}	
-	//Optional part ends
-
-	// private methods
-	
-	/**
-	 * Initializes the enabled connections. This will NOT start them, but only create the
-	 * instances that will be used in the {@link #startManager() and #stopManager()) methods.
-	 * 
-	 */
 	private void initConnections()
 	{
 	}
@@ -675,36 +730,41 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private void initManager()
 	{
 		ConfigUtil configUtil = ConfigUtil.getInstance();
-		
+
 		this.enableSystemPerf =
-			configUtil.getBoolean(ConfigConst.GATEWAY_DEVICE,  ConfigConst.ENABLE_SYSTEM_PERF_KEY);
-		
+			configUtil.getBoolean(
+				ConfigConst.GATEWAY_DEVICE,
+				ConfigConst.ENABLE_SYSTEM_PERF_KEY
+			);
+
 		if (this.enableSystemPerf) {
 			this.sysPerfMgr = new SystemPerformanceManager();
 			this.sysPerfMgr.setDataMessageListener(this);
 		}
-		
+
 		if (this.enableMqttClient) {
 			this.mqttClient = new MqttClientConnector();
 			this.mqttClient.setDataMessageListener(this);
 		}
-	
+
 		if (this.enableCoapServer) {
 			this.coapServer = new CoapServerGateway(this);
 		}
-		
+
 		if (this.enableCoapClient) {
 			this.coapClient = new CoapClientConnector();
 			this.coapClient.setDataMessageListener(this);
 		}
 
 		if (this.enableCloudClient) {
-			// TODO: implement this in Lab Module 10
+			this.cloudClient =
+				new CloudClientConnector(ConfigConst.UBIDOTS_CLOUD_GATEWAY_SERVICE);
+			this.cloudClient.setDataMessageListener(this);
 		}
-		
+
 		if (this.enablePersistenceClient) {
 			this.redisClient = new RedisPersistenceAdapter();
-    		_Logger.info("Redis Persistence client enabled.");
+			_Logger.info("Redis Persistence client enabled.");
 		}
-	}	
+	}
 }
