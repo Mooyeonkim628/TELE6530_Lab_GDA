@@ -55,6 +55,7 @@ public class CloudClientConnector implements ICloudClient, IConnectionListener
 		if (this.mqttClient == null) {
 			this.mqttClient = new MqttClientConnector(this.cloudGatewaySectionName);
 			this.mqttClient.setConnectionListener(this);
+			this.mqttClient.setDataMessageListener(this.dataMsgListener);
 		}
 
 		return this.mqttClient.connectClient();
@@ -217,6 +218,17 @@ public class CloudClientConnector implements ICloudClient, IConnectionListener
 	public void onConnect()
 	{
 		_Logger.info("Cloud MQTT connection established.");
+
+		if (this.mqttClient != null && this.mqttClient.isConnected()) {
+			this.mqttClient.subscribeToTopic(
+				"/v1.6/devices/constraineddevice/hvac/lv", 
+				this.qosLevel);
+			this.mqttClient.subscribeToTopic(
+				"/v1.6/devices/constraineddevice/humidifier/lv", 
+				this.qosLevel);
+
+			_Logger.info("Subscribed to Ubidots control topics.");
+		}
 	}
 
 	@Override
@@ -275,20 +287,22 @@ public class CloudClientConnector implements ICloudClient, IConnectionListener
 
 	private String mapSensorLabel(SensorData data)
 	{
-		if (data == null || data.getName() == null) {
+		if (data == null) {
 			return "sensor";
 		}
 
-		String normalized = data.getName().trim().toLowerCase();
-
-		if (normalized.contains("temp")) {
-			return "temp";
-		} else if (normalized.contains("press")) {
-			return "pressure";
-		} else if (normalized.contains("humid")) {
-			return "humidity";
+		switch (data.getTypeID()) {
+			case 1010: return "humidity";
+			case 1012: return "pressure";
+			case 1013: return "temp";
+			default: break;
 		}
 
+		if (data.getName() == null) return "sensor";
+		String normalized = data.getName().trim().toLowerCase();
+		if (normalized.contains("temp"))   return "temp";
+		if (normalized.contains("press"))  return "pressure";
+		if (normalized.contains("humid"))  return "humidity";
 		return normalized;
 	}
 

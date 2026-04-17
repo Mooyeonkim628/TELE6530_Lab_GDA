@@ -276,7 +276,6 @@ public class MqttClientConnector implements IPubSubClient, MqttCallbackExtended
 		if (!this.useCloudGatewayConfig) {
 			this.subscribeToTopic(ResourceNameEnum.CDA_ACTUATOR_RESPONSE_RESOURCE, qos);
 			this.subscribeToTopic(ResourceNameEnum.CDA_SENSOR_MSG_RESOURCE, qos);
-			// CDA system performance는 subscribe 하지 않음
 		}
 
 		if (this.connListener != null) {
@@ -352,7 +351,54 @@ public class MqttClientConnector implements IPubSubClient, MqttCallbackExtended
 				return;
 			}
 			else {
-				_Logger.warning("Unhandled MQTT topic: " + topic);
+				_Logger.info("Received cloud control message on topic: " + topic);
+
+				if (this.dataMsgListener != null) {
+					try {
+						// Ubidots /lv topic sends plain float (e.g. "1.0") or JSON
+						String clean = payload.trim();
+						float value = 0.0f;
+						try {
+							value = Float.parseFloat(clean);
+						} catch (NumberFormatException e) {
+							if (clean.startsWith("[")) {
+								clean = clean.substring(1, clean.lastIndexOf("]")).trim();
+							}
+							java.util.regex.Matcher m =
+								java.util.regex.Pattern.compile("\"value\"\\s*:\\s*([0-9.]+)").matcher(clean);
+							if (m.find()) value = Float.parseFloat(m.group(1));
+						}
+
+						ActuatorData ad = new ActuatorData();
+						if (topic.contains("hvac")) {
+							ad.setName(ConfigConst.HVAC_ACTUATOR_NAME);
+							ad.setTypeID(ConfigConst.HVAC_ACTUATOR_TYPE);
+						} else if (topic.contains("humidifier")) {
+							ad.setName(ConfigConst.HUMIDIFIER_ACTUATOR_NAME);
+							ad.setTypeID(ConfigConst.HUMIDIFIER_ACTUATOR_TYPE);
+						}
+						ad.setCommand((int) value);
+						ad.setValue(value);
+
+						// CDA location ID 설정 - location mismatch 방지
+						ad.setLocationID(
+							ConfigUtil.getInstance().getProperty(
+								ConfigConst.CONSTRAINED_DEVICE,
+								ConfigConst.DEVICE_LOCATION_ID_KEY,
+								"CDA_Mooyeon_Kim"
+							)
+						);
+
+						String jsonData = DataUtil.getInstance().actuatorDataToJson(ad);
+						_Logger.info("Cloud command parsed: " + jsonData);
+
+						this.dataMsgListener.handleIncomingMessage(
+							ResourceNameEnum.CDA_ACTUATOR_CMD_RESOURCE, jsonData);
+
+					} catch (Exception e) {
+						_Logger.warning("Failed to process cloud control message: " + e.getMessage());
+					}
+				}
 			}
 		}
 		catch (Exception e) {

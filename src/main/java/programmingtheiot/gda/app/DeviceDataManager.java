@@ -73,6 +73,14 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 	private static final int NO_PENDING_COMMAND = -1;
 	private int pendingHumidifierCommand = NO_PENDING_COMMAND;
 
+	// [FIX] Cloud override: cloud에서 humidifier 명령 수신 시 타임스탬프 기록
+	// 이 시간 이후 cloudOverrideDurationMs 동안 로컬 threshold 로직 비활성화
+	private long cloudHumidifierOverrideTime = 0L;
+	private long cloudOverrideDurationMs = 600_000L; // 기본 10분, config에서 override 가능
+
+	// [FIX] 시작 후 첫 번째 Ubidots LV sync 무시 플래그 (Humidifier만)
+	private boolean hasReceivedInitialHumidifierSync  = false;
+
 	public DeviceDataManager()
 	{
 		super();
@@ -129,6 +137,11 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				ConfigConst.GATEWAY_DEVICE,
 				"triggerHumidifierCeiling"
 			);
+
+		// [FIX] config에서 override duration 로드 (없으면 기본 600초)
+		float overrideSecs = ConfigUtil.getInstance().getFloat(
+			ConfigConst.GATEWAY_DEVICE, "cloudOverrideDurationSecs", 600.0f);
+		this.cloudOverrideDurationMs = (long)(overrideSecs * 1000L);
 
 		initManager();
 	}
@@ -219,6 +232,33 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 				if (ad == null) {
 					_Logger.warning("Failed to parse incoming ActuatorData JSON: " + msg);
 					return false;
+				}
+
+				// [FIX] 초기 LV sync 필터링 + override 세팅
+				// - 첫 번째 신호: CDA 포워딩 안 함, override 세팅 안 함
+				// - 이후 신호: CDA 포워딩 + humidifier는 override 세팅
+				if (ad.getTypeID() == ConfigConst.HVAC_ACTUATOR_TYPE) {
+					// HVAC: 초기 sync 필터 없음 - 항상 CDA로 포워딩
+					// CDA에서 cloudHvacOverrideTime으로 override 처리
+					_Logger.info("HVAC cloud command received (command=" + ad.getCommand() + "). Forwarding to CDA.");
+				} else if (ad.getTypeID() == ConfigConst.HUMIDIFIER_ACTUATOR_TYPE) {
+					if (!this.hasReceivedInitialHumidifierSync) {
+						this.hasReceivedInitialHumidifierSync = true;
+						_Logger.info("Initial Humidifier LV sync (command=" + ad.getCommand() + "). Skipping CDA forward.");
+						return true;
+					}
+					boolean isNewCommand = (ad.getCommand() != this.lastKnownHumidifierCommand);
+					if (isNewCommand) {
+						this.cloudHumidifierOverrideTime = System.currentTimeMillis();
+						_Logger.info("Cloud override SET for Humidifier (command=" + ad.getCommand() +
+							"). Local threshold logic disabled for " +
+							(this.cloudOverrideDurationMs / 1000) + " secs.");
+						this.latestHumiditySensorData = null;
+						this.latestHumiditySensorTimeStamp = null;
+						this.pendingHumidifierCommand = NO_PENDING_COMMAND;
+					} else {
+						_Logger.fine("Cloud override SKIPPED (same command=" + ad.getCommand() + ").");
+					}
 				}
 
 				String jsonData = DataUtil.getInstance().actuatorDataToJson(ad);
@@ -422,6 +462,17 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 		float humidity = data.getValue();
 		_Logger.info("Analyzing humidity data: " + humidity);
 
+		// [FIX] Cloud override 활성 중이면 로컬 threshold 로직 전체 스킵
+		if (isCloudHumidifierOverrideActive()) {
+			long remaining = (this.cloudOverrideDurationMs -
+				(System.currentTimeMillis() - this.cloudHumidifierOverrideTime)) / 1000L;
+			_Logger.info(
+				"Cloud override active for Humidifier. Skipping local threshold. " +
+				"Remaining: " + remaining + " secs."
+			);
+			return;
+		}
+
 		boolean isLow = humidity < this.triggerHumidifierFloor;
 		boolean isHigh = humidity > this.triggerHumidifierCeiling;
 		boolean isNominal = !isLow && !isHigh;
@@ -510,6 +561,16 @@ public class DeviceDataManager extends JedisPubSub implements IDataMessageListen
 
 		this.latestHumiditySensorData = null;
 		this.latestHumiditySensorTimeStamp = null;
+	}
+
+	// [FIX] cloud override 활성 여부 확인
+	private boolean isCloudHumidifierOverrideActive()
+	{
+		if (this.cloudHumidifierOverrideTime == 0L) {
+			return false;
+		}
+		long elapsed = System.currentTimeMillis() - this.cloudHumidifierOverrideTime;
+		return elapsed < this.cloudOverrideDurationMs;
 	}
 
 	private void resetHumidityThresholdState()
